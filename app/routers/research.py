@@ -1,20 +1,8 @@
 from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-from pathlib import Path
 
 from app.models.schemas import ResearchRequest
 
 router = APIRouter(prefix="/api/research", tags=["research"])
-templates = Jinja2Templates(directory=Path(__file__).resolve().parent.parent / "templates")
-
-
-@router.get("/", response_class=HTMLResponse)
-async def research_page(request: Request):
-    from app.models.schemas import PhishingScenario
-
-    scenarios = [{"value": s.value, "label": s.value.replace("_", " ").title()} for s in PhishingScenario]
-    return templates.TemplateResponse("research.html", {"request": request, "scenarios": scenarios})
 
 
 @router.post("/run")

@@ -4,6 +4,7 @@
 <h1>Phishing Call Dashboard</h1>
 
 <div class="grid">
+    <!-- Left column: Call form + Standalone research -->
     <div>
         <article>
             <header>Initiate Phishing Call</header>
@@ -40,8 +41,38 @@
             </form>
             <div id="call-result"></div>
         </article>
+
+        <article>
+            <header>Standalone Research</header>
+            <form id="research-form" hx-post="/api/research/run" hx-target="#research-results" hx-swap="innerHTML"
+                  hx-headers='{"Content-Type": "application/json"}'
+                  hx-ext="json-enc"
+                  hx-indicator="#research-spinner">
+                <label for="research_target_name">Target Name</label>
+                <input type="text" id="research_target_name" name="target_name" placeholder="John Doe" required>
+
+                <label for="research_company">Company</label>
+                <input type="text" id="research_company" name="company" placeholder="Acme Corp" required>
+
+                <label for="research_scenario">Scenario Context</label>
+                <select id="research_scenario" name="scenario" required>
+                    {% for s in scenarios %}
+                    <option value="{{ s.value }}">{{ s.label }}</option>
+                    {% endfor %}
+                </select>
+
+                <button type="submit">
+                    <span id="research-spinner" class="htmx-indicator" aria-busy="true"></span>
+                    Run Research
+                </button>
+            </form>
+            <div id="research-results">
+                <p>Submit the form to run background research on a target.</p>
+            </div>
+        </article>
     </div>
 
+    <!-- Right column: Active call details -->
     <div>
         <article>
             <header>Active Call</header>
@@ -51,17 +82,39 @@
         </article>
 
         <article>
+            <header>Phishing Script</header>
+            <div id="script-panel">
+                <p>Script will appear here once generated.</p>
+            </div>
+        </article>
+
+        <article>
+            <header>Research Findings</header>
+            <div id="findings-panel">
+                <p>Research findings will appear here if enabled.</p>
+            </div>
+        </article>
+
+        <article>
             <header>Live Transcript</header>
             <div id="transcript-panel">
                 <div class="transcript-box">Waiting for call...</div>
             </div>
         </article>
+
+        <article>
+            <header>Assessment Report</header>
+            <div id="report-panel">
+                <p>Report will be generated after the call completes.</p>
+            </div>
+        </article>
     </div>
 </div>
 
-{% if active_calls %}
+<!-- Call history / reports table -->
+{% if all_calls %}
 <article>
-    <header>Recent Calls</header>
+    <header>Call History</header>
     <table>
         <thead>
             <tr>
@@ -69,17 +122,25 @@
                 <th>Company</th>
                 <th>Scenario</th>
                 <th>Status</th>
-                <th>Action</th>
+                <th>Date</th>
+                <th>Notion</th>
             </tr>
         </thead>
         <tbody>
-            {% for call in active_calls %}
+            {% for call in all_calls %}
             <tr>
                 <td>{{ call.request.target_name }}</td>
                 <td>{{ call.request.company }}</td>
                 <td>{{ call.request.scenario.value | replace('_', ' ') | title }}</td>
                 <td><span class="status-badge status-{{ call.status.value }}">{{ call.status.value | replace('_', ' ') | title }}</span></td>
-                <td><a href="/calls/{{ call.id }}">View</a></td>
+                <td>{{ call.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>
+                    {% if call.notion_page_url %}
+                    <a href="{{ call.notion_page_url }}" target="_blank">View</a>
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
@@ -91,18 +152,39 @@
 document.body.addEventListener('htmx:afterRequest', function(event) {
     if (event.detail.elt.id === 'call-form' && event.detail.successful) {
         try {
-            const data = JSON.parse(event.detail.xhr.responseText);
-            const callId = data.call_id;
+            var data = JSON.parse(event.detail.xhr.responseText);
+            var callId = data.call_id;
             if (callId) {
+                // Status polling
                 document.getElementById('active-call-panel').innerHTML =
                     '<div id="call-status" hx-get="/api/calls/' + callId + '/status" hx-trigger="every 2s" hx-swap="outerHTML">' +
-                    '<span class="status-badge status-pending">Pending</span></div>' +
-                    '<p><a href="/calls/' + callId + '">View call details</a></p>';
+                    '<span class="status-badge status-pending">Pending</span></div>';
+
+                // Transcript polling
                 document.getElementById('transcript-panel').innerHTML =
                     '<div id="transcript" hx-get="/api/calls/' + callId + '/transcript" hx-trigger="every 3s" hx-swap="outerHTML">' +
                     '<div class="transcript-box">Waiting for call to begin...</div></div>';
+
+                // Script polling (appears once generated)
+                document.getElementById('script-panel').innerHTML =
+                    '<div id="script" hx-get="/api/calls/' + callId + '/script" hx-trigger="every 3s" hx-swap="outerHTML">' +
+                    '<p>Generating script...</p></div>';
+
+                // Research findings polling
+                document.getElementById('findings-panel').innerHTML =
+                    '<div id="findings" hx-get="/api/calls/' + callId + '/findings" hx-trigger="every 3s" hx-swap="outerHTML">' +
+                    '<p>Running research...</p></div>';
+
+                // Report polling (appears once call completes)
+                document.getElementById('report-panel').innerHTML =
+                    '<div id="report" hx-get="/api/calls/' + callId + '/report" hx-trigger="every 5s" hx-swap="outerHTML">' +
+                    '<p>Report will be generated after the call completes.</p></div>';
+
                 htmx.process(document.getElementById('active-call-panel'));
                 htmx.process(document.getElementById('transcript-panel'));
+                htmx.process(document.getElementById('script-panel'));
+                htmx.process(document.getElementById('findings-panel'));
+                htmx.process(document.getElementById('report-panel'));
             }
         } catch(e) {}
     }

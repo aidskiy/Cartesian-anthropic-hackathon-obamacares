@@ -28,7 +28,7 @@ async def _poll_call_completion(
         try:
             call_data = await cartesia.get_call(record.cartesia_call_id)
             status = call_data.get("status", "")
-            if status in ("completed", "ended", "failed", "no-answer", "busy"):
+            if status in ("completed", "failed", "cancelled", "ended", "no-answer", "busy"):
                 return await cartesia.get_transcript(record.cartesia_call_id)
         except Exception:
             continue
@@ -109,18 +109,15 @@ async def process_call(call_id: str, request: Request):
         phone_numbers = await cartesia.list_phone_numbers()
         if not phone_numbers:
             raise RuntimeError("No phone numbers available in Cartesia account")
-        from_number = phone_numbers[0]["phone_number"]
+        # Phone number objects may use "phone_number" or "number" key
+        first = phone_numbers[0]
+        from_number = first.get("phone_number") or first.get("number") or str(first)
 
         call_result = await cartesia.initiate_call(
             to_number=record.request.phone_number,
             from_number=from_number,
             system_prompt=script.system_prompt,
             introduction=script.introduction,
-            context_metadata={
-                "dashboard_call_id": call_id,
-                "system_prompt": script.system_prompt,
-                "introduction": script.introduction,
-            },
         )
         record.cartesia_call_id = call_result.get("id", "")
         record.status = CallStatus.in_progress
@@ -167,7 +164,7 @@ async def get_call_status(call_id: str, request: Request):
             cartesia = request.app.state.cartesia
             call_data = await cartesia.get_call(record.cartesia_call_id)
             cartesia_status = call_data.get("status", "")
-            if cartesia_status in ("completed", "ended"):
+            if cartesia_status in ("completed", "ended", "cancelled"):
                 record.status = CallStatus.completed
                 # Fetch final transcript
                 record.transcript = await cartesia.get_transcript(
@@ -206,6 +203,84 @@ async def get_call_transcript(call_id: str, request: Request):
     return HTMLResponse(f"""
         <div id="transcript" hx-get="/api/calls/{call_id}/transcript" {trigger} hx-swap="outerHTML">
             <div class="transcript-box">{transcript}</div>
+        </div>
+    """)
+
+
+@router.get("/{call_id}/script")
+async def get_call_script(call_id: str):
+    """HTMX partial: return the phishing script details."""
+    record = call_store.get(call_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Call not found")
+
+    if not record.script:
+        trigger = 'hx-trigger="every 3s"' if record.status not in (CallStatus.completed, CallStatus.failed) else ''
+        return HTMLResponse(f"""
+            <div id="script" hx-get="/api/calls/{call_id}/script" {trigger} hx-swap="outerHTML">
+                <p>Generating script...</p>
+            </div>
+        """)
+
+    s = record.script
+    points_html = "".join(f"<li>{html.escape(p)}</li>" for p in (s.key_talking_points or []))
+    return HTMLResponse(f"""
+        <div id="script">
+            <p><strong>Persona:</strong> {html.escape(s.persona_name)} &mdash; {html.escape(s.persona_role)}</p>
+            <p><strong>Introduction:</strong> {html.escape(s.introduction)}</p>
+            <h4>Key Talking Points</h4>
+            <ul>{points_html}</ul>
+        </div>
+    """)
+
+
+@router.get("/{call_id}/findings")
+async def get_call_findings(call_id: str):
+    """HTMX partial: return the research findings."""
+    record = call_store.get(call_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Call not found")
+
+    if not record.research or not record.research.synthesis:
+        trigger = 'hx-trigger="every 3s"' if record.status not in (CallStatus.completed, CallStatus.failed) else ''
+        label = "Running research..." if record.status == CallStatus.researching else "No research findings."
+        return HTMLResponse(f"""
+            <div id="findings" hx-get="/api/calls/{call_id}/findings" {trigger} hx-swap="outerHTML">
+                <p>{label}</p>
+            </div>
+        """)
+
+    return HTMLResponse(f"""
+        <div id="findings">
+            <div class="transcript-box">{html.escape(record.research.synthesis)}</div>
+        </div>
+    """)
+
+
+@router.get("/{call_id}/report")
+async def get_call_report(call_id: str):
+    """HTMX partial: return the assessment report."""
+    record = call_store.get(call_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Call not found")
+
+    if not record.report_markdown:
+        trigger = 'hx-trigger="every 5s"' if record.status not in (CallStatus.completed, CallStatus.failed) else ''
+        label = "Report will be generated after the call completes." if record.status != CallStatus.failed else "Call failed — no report generated."
+        return HTMLResponse(f"""
+            <div id="report" hx-get="/api/calls/{call_id}/report" {trigger} hx-swap="outerHTML">
+                <p>{label}</p>
+            </div>
+        """)
+
+    notion_link = ""
+    if record.notion_page_url:
+        notion_link = f'<p><a href="{html.escape(record.notion_page_url)}" target="_blank" role="button">View Notion Report</a></p>'
+
+    return HTMLResponse(f"""
+        <div id="report">
+            {notion_link}
+            <div class="transcript-box">{html.escape(record.report_markdown)}</div>
         </div>
     """)
 
