@@ -1,10 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Obama Cares{% endblock %}</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <link rel="stylesheet" href="/static/styles.css">
     <script src="/static/htmx.min.js"></script>
 </head>
@@ -12,7 +11,7 @@
     <header class="container">
         <nav>
             <ul>
-                <li><a href="/"><strong>Obama Cares</strong></a></li>
+                <li><a href="/" class="nav-logo"><img src="/static/logo.svg" alt="Obama Cares"><span>ObamaCares</span></a></li>
             </ul>
             <ul>
                 <li><a href="/">Dashboard</a></li>

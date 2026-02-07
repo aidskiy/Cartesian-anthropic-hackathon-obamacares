@@ -8,7 +8,7 @@ from app.models.schemas import PhishingScenario, PhishingScript
 
 class LLMService:
     def __init__(self):
-        self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        self.client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         self.model = "claude-sonnet-4-5-20250929"
 
     async def generate_phishing_script(
@@ -65,7 +65,7 @@ Make it realistic and sophisticated. The persona should feel like a real person 
 
 Return ONLY valid JSON, no markdown formatting."""
 
-        response = self.client.messages.create(
+        response = await self.client.messages.create(
             model=self.model,
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
@@ -96,7 +96,7 @@ Create a markdown summary that includes:
 
 Keep it actionable and focused on what would help a caller sound credible."""
 
-        response = self.client.messages.create(
+        response = await self.client.messages.create(
             model=self.model,
             max_tokens=1500,
             messages=[{"role": "user", "content": prompt}],
@@ -152,7 +152,7 @@ Specific training recommendations for the target based on observed vulnerabiliti
 ## Full Transcript
 Include the complete transcript."""
 
-        response = self.client.messages.create(
+        response = await self.client.messages.create(
             model=self.model,
             max_tokens=3000,
             messages=[{"role": "user", "content": prompt}],
