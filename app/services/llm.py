@@ -1,4 +1,5 @@
 import json
+import re
 
 import anthropic
 
@@ -72,6 +73,9 @@ Return ONLY valid JSON, no markdown formatting."""
         )
 
         text = response.content[0].text
+        # Strip markdown code fences if Claude wraps the JSON
+        text = re.sub(r"^```(?:json)?\s*\n?", "", text.strip())
+        text = re.sub(r"\n?```\s*$", "", text.strip())
         data = json.loads(text)
         return PhishingScript(**data)
 

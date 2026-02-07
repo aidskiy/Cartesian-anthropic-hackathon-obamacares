@@ -1,9 +1,8 @@
-import subprocess
-import json
-
 import httpx
 
 from app.config import settings
+
+TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
 
 class CartesiaClientService:
@@ -18,7 +17,7 @@ class CartesiaClientService:
         }
 
     async def list_phone_numbers(self) -> list[dict]:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             resp = await client.get(
                 f"{self.base_url}/phone-numbers",
                 headers=self.headers,
@@ -49,18 +48,17 @@ class CartesiaClientService:
         if context_metadata:
             payload["metadata"] = context_metadata
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             resp = await client.post(
                 f"{self.base_url}/calls",
                 headers=self.headers,
                 json=payload,
-                timeout=30.0,
             )
             resp.raise_for_status()
             return resp.json()
 
     async def get_call(self, call_id: str) -> dict:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             resp = await client.get(
                 f"{self.base_url}/calls/{call_id}",
                 headers=self.headers,
@@ -83,7 +81,7 @@ class CartesiaClientService:
         return "\n\n".join(lines)
 
     async def list_calls(self, limit: int = 20) -> list[dict]:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             resp = await client.get(
                 f"{self.base_url}/calls",
                 headers=self.headers,

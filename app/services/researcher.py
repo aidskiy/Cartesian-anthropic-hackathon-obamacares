@@ -1,3 +1,6 @@
+import asyncio
+from urllib.parse import quote_plus
+
 from browserbase import Browserbase
 from playwright.async_api import async_playwright
 
@@ -56,37 +59,47 @@ class ResearcherService:
 
         raw_findings: list[str] = []
 
-        session = self.bb.sessions.create(project_id=self.project_id)
-        debug_urls = self.bb.sessions.debug(session.id)
-        ws_url = debug_urls.debugger_fullscreen_url
+        # Browserbase SDK is sync — run in thread to avoid blocking
+        session = await asyncio.to_thread(
+            self.bb.sessions.create, project_id=self.project_id
+        )
+        debug_urls = await asyncio.to_thread(self.bb.sessions.debug, session.id)
+        ws_url = debug_urls.ws_url
 
-        async with async_playwright() as pw:
-            browser = await pw.chromium.connect_over_cdp(ws_url)
-            context = browser.contexts[0]
-            page = context.pages[0] if context.pages else await context.new_page()
+        try:
+            async with async_playwright() as pw:
+                browser = await pw.chromium.connect_over_cdp(ws_url)
+                context = browser.contexts[0]
+                page = context.pages[0] if context.pages else await context.new_page()
 
-            for query in queries:
-                try:
-                    await page.goto(
-                        f"https://www.google.com/search?q={query}", timeout=15000
-                    )
-                    await page.wait_for_load_state("domcontentloaded")
+                for query in queries:
+                    try:
+                        url = f"https://www.google.com/search?q={quote_plus(query)}"
+                        await page.goto(url, timeout=15000)
+                        await page.wait_for_load_state("domcontentloaded")
 
-                    # Extract search result snippets
-                    results = await page.query_selector_all("div.g")
-                    snippets = []
-                    for result in results[:5]:
-                        text = await result.inner_text()
-                        if text.strip():
-                            snippets.append(text.strip())
+                        results = await page.query_selector_all("div.g")
+                        snippets = []
+                        for result in results[:5]:
+                            text = await result.inner_text()
+                            if text.strip():
+                                snippets.append(text.strip())
 
-                    if snippets:
-                        finding = f"Query: {query}\n\n" + "\n\n".join(snippets)
-                        raw_findings.append(finding)
-                except Exception as e:
-                    raw_findings.append(f"Query: {query}\nError: {str(e)}")
+                        if snippets:
+                            finding = f"Query: {query}\n\n" + "\n\n".join(snippets)
+                            raw_findings.append(finding)
+                    except Exception as e:
+                        raw_findings.append(f"Query: {query}\nError: {str(e)}")
 
-            await browser.close()
+                await browser.close()
+        finally:
+            # Clean up the Browserbase session
+            try:
+                await asyncio.to_thread(
+                    self.bb.sessions.update, session.id, status="REQUEST_RELEASE"
+                )
+            except Exception:
+                pass
 
         return ResearchResult(
             target_name=target_name,

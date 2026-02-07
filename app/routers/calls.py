@@ -1,5 +1,6 @@
 import uuid
 import asyncio
+import html
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Request, HTTPException
@@ -106,7 +107,9 @@ async def process_call(call_id: str, request: Request):
         # Step 3: Initiate call via Cartesia
         record.status = CallStatus.calling
         phone_numbers = await cartesia.list_phone_numbers()
-        from_number = phone_numbers[0]["phone_number"] if phone_numbers else ""
+        if not phone_numbers:
+            raise RuntimeError("No phone numbers available in Cartesia account")
+        from_number = phone_numbers[0]["phone_number"]
 
         call_result = await cartesia.initiate_call(
             to_number=record.request.phone_number,
@@ -176,7 +179,7 @@ async def get_call_status(call_id: str, request: Request):
     return HTMLResponse(f"""
         <div id="call-status" hx-get="/api/calls/{call_id}/status" hx-trigger="every 2s" hx-swap="outerHTML">
             <span class="status-badge status-{record.status.value}">{record.status.value.replace('_', ' ').title()}</span>
-            {f'<p style="color: var(--pico-del-color);">{record.error}</p>' if record.error else ''}
+            {f'<p style="color: var(--color-error);">{html.escape(record.error)}</p>' if record.error else ''}
         </div>
     """)
 
@@ -197,7 +200,7 @@ async def get_call_transcript(call_id: str, request: Request):
         except Exception:
             pass
 
-    transcript = record.transcript or "Waiting for call to begin..."
+    transcript = html.escape(record.transcript or "Waiting for call to begin...")
     trigger = 'hx-trigger="every 3s"' if record.status not in (CallStatus.completed, CallStatus.failed) else ''
 
     return HTMLResponse(f"""
