@@ -1,0 +1,36 @@
+/* Obama Cares - Custom Styles */
+
+.status-badge {
+    display: inline-block;
+    padding: 0.25em 0.75em;
+    border-radius: 1em;
+    font-size: 0.85em;
+    font-weight: 600;
+}
+
+.status-pending { background: var(--pico-secondary-background); }
+.status-researching { background: #2563eb; color: white; }
+.status-generating_script { background: #7c3aed; color: white; }
+.status-calling { background: #d97706; color: white; }
+.status-in_progress { background: #059669; color: white; }
+.status-completed { background: #16a34a; color: white; }
+.status-failed { background: #dc2626; color: white; }
+
+.transcript-box {
+    background: var(--pico-card-background-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 0.5em;
+    padding: 1em;
+    max-height: 500px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    font-family: monospace;
+    font-size: 0.9em;
+}
+
+.call-card {
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: 0.5em;
+    padding: 1.5em;
+    margin-bottom: 1em;
+}

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Reports - Obama Cares{% endblock %}
+{% block content %}
+<h1>Assessment Reports</h1>
+
+{% if reports %}
+<table>
+    <thead>
+        <tr>
+            <th>Target</th>
+            <th>Company</th>
+            <th>Scenario</th>
+            <th>Date</th>
+            <th>Notion</th>
+            <th>Details</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in reports %}
+        <tr>
+            <td>{{ r.request.target_name }}</td>
+            <td>{{ r.request.company }}</td>
+            <td>{{ r.request.scenario.value | replace('_', ' ') | title }}</td>
+            <td>{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>
+                {% if r.notion_page_url %}
+                <a href="{{ r.notion_page_url }}" target="_blank">View</a>
+                {% else %}
+                -
+                {% endif %}
+            </td>
+            <td><a href="/calls/{{ r.id }}">Details</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No completed assessments yet. Initiate a call from the <a href="/">Dashboard</a>.</p>
+{% endif %}
+{% endblock %}

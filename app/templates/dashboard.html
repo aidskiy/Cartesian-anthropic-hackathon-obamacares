@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Obama Cares{% endblock %}
+{% block content %}
+<h1>Phishing Call Dashboard</h1>
+
+<div class="grid">
+    <div>
+        <article>
+            <header>Initiate Phishing Call</header>
+            <form id="call-form" hx-post="/api/calls/initiate" hx-target="#call-result" hx-swap="innerHTML"
+                  hx-headers='{"Content-Type": "application/json"}'
+                  hx-ext="json-enc">
+                <label for="phone_number">Phone Number</label>
+                <input type="tel" id="phone_number" name="phone_number" placeholder="+1234567890" required>
+
+                <label for="target_name">Target Name</label>
+                <input type="text" id="target_name" name="target_name" placeholder="John Doe" required>
+
+                <label for="company">Company</label>
+                <input type="text" id="company" name="company" placeholder="Acme Corp" required>
+
+                <label for="scenario">Phishing Scenario</label>
+                <select id="scenario" name="scenario" required>
+                    {% for s in scenarios %}
+                    <option value="{{ s.value }}">{{ s.label }}</option>
+                    {% endfor %}
+                </select>
+
+                <label for="additional_context">Additional Context</label>
+                <textarea id="additional_context" name="additional_context" placeholder="Any additional info about the target..."></textarea>
+
+                <fieldset>
+                    <label>
+                        <input type="checkbox" name="run_research" value="true" checked>
+                        Run background research before calling
+                    </label>
+                </fieldset>
+
+                <button type="submit">Initiate Call</button>
+            </form>
+            <div id="call-result"></div>
+        </article>
+    </div>
+
+    <div>
+        <article>
+            <header>Active Call</header>
+            <div id="active-call-panel">
+                <p>No active call. Initiate one using the form.</p>
+            </div>
+        </article>
+
+        <article>
+            <header>Live Transcript</header>
+            <div id="transcript-panel">
+                <div class="transcript-box">Waiting for call...</div>
+            </div>
+        </article>
+    </div>
+</div>
+
+{% if active_calls %}
+<article>
+    <header>Recent Calls</header>
+    <table>
+        <thead>
+            <tr>
+                <th>Target</th>
+                <th>Company</th>
+                <th>Scenario</th>
+                <th>Status</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for call in active_calls %}
+            <tr>
+                <td>{{ call.request.target_name }}</td>
+                <td>{{ call.request.company }}</td>
+                <td>{{ call.request.scenario.value | replace('_', ' ') | title }}</td>
+                <td><span class="status-badge status-{{ call.status.value }}">{{ call.status.value | replace('_', ' ') | title }}</span></td>
+                <td><a href="/calls/{{ call.id }}">View</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</article>
+{% endif %}
+
+<script>
+document.body.addEventListener('htmx:afterRequest', function(event) {
+    if (event.detail.elt.id === 'call-form' && event.detail.successful) {
+        try {
+            const data = JSON.parse(event.detail.xhr.responseText);
+            const callId = data.call_id;
+            if (callId) {
+                document.getElementById('active-call-panel').innerHTML =
+                    '<div id="call-status" hx-get="/api/calls/' + callId + '/status" hx-trigger="every 2s" hx-swap="outerHTML">' +
+                    '<span class="status-badge status-pending">Pending</span></div>' +
+                    '<p><a href="/calls/' + callId + '">View call details</a></p>';
+                document.getElementById('transcript-panel').innerHTML =
+                    '<div id="transcript" hx-get="/api/calls/' + callId + '/transcript" hx-trigger="every 3s" hx-swap="outerHTML">' +
+                    '<div class="transcript-box">Waiting for call to begin...</div></div>';
+                htmx.process(document.getElementById('active-call-panel'));
+                htmx.process(document.getElementById('transcript-panel'));
+            }
+        } catch(e) {}
+    }
+});
+</script>
+{% endblock %}

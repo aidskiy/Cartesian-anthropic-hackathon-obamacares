@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Research - Obama Cares{% endblock %}
+{% block content %}
+<h1>Target Research</h1>
+
+<div class="grid">
+    <article>
+        <header>Run Research</header>
+        <form hx-post="/api/research/run" hx-target="#research-results" hx-swap="innerHTML"
+              hx-headers='{"Content-Type": "application/json"}'
+              hx-ext="json-enc"
+              hx-indicator="#research-spinner">
+            <label for="target_name">Target Name</label>
+            <input type="text" id="target_name" name="target_name" placeholder="John Doe" required>
+
+            <label for="company">Company</label>
+            <input type="text" id="company" name="company" placeholder="Acme Corp" required>
+
+            <label for="scenario">Scenario Context</label>
+            <select id="scenario" name="scenario" required>
+                {% for s in scenarios %}
+                <option value="{{ s.value }}">{{ s.label }}</option>
+                {% endfor %}
+            </select>
+
+            <button type="submit">
+                <span id="research-spinner" class="htmx-indicator" aria-busy="true"></span>
+                Run Research
+            </button>
+        </form>
+    </article>
+
+    <article>
+        <header>Results</header>
+        <div id="research-results">
+            <p>Submit the form to run background research on a target.</p>
+        </div>
+    </article>
+</div>
+{% endblock %}
