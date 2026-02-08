@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     browserbase_api_key: str = ""
     browserbase_project_id: str = ""
+    exa_api_key: str = ""
     notion_secret: str = ""
     notion_parent_page_id: str = ""
     dashboard_base_url: str = "http://localhost:8000"

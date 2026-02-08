@@ -4,7 +4,7 @@ import html
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Request, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
@@ -179,10 +179,19 @@ async def get_call_status(call_id: str, request: Request):
 
     trigger = 'hx-trigger="every 2s"' if record.status not in (CallStatus.completed, CallStatus.failed) else ''
 
+    retry_btn = ""
+    if record.status in (CallStatus.completed, CallStatus.failed):
+        retry_btn = f'''
+            <form method="POST" action="/api/calls/{call_id}/retry" style="margin-top: 0.5rem;">
+                <button type="submit" class="contrast">Call Again</button>
+            </form>
+        '''
+
     return HTMLResponse(f"""
         <div id="call-status" hx-get="/api/calls/{call_id}/status" {trigger} hx-swap="outerHTML">
             <span class="status-badge status-{record.status.value}">{record.status.value.replace('_', ' ').title()}</span>
             {f'<p style="color: var(--color-error);">{html.escape(record.error)}</p>' if record.error else ''}
+            {retry_btn}
         </div>
     """)
 
@@ -356,6 +365,26 @@ async def complete_call(call_id: str, request: Request):
         logger.exception(f"Report generation failed for {call_id}")
         record.error = str(e)
         return {"status": "error", "error": str(e)}
+
+
+@router.post("/{call_id}/retry")
+async def retry_call(
+    call_id: str,
+    background_tasks: BackgroundTasks,
+    request: Request,
+):
+    """Re-initiate a call with the same parameters as the original."""
+    record = call_store.get(call_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Call not found")
+
+    new_call_id = str(uuid.uuid4())
+    new_record = CallRecord(id=new_call_id, request=record.request)
+    call_store[new_call_id] = new_record
+
+    background_tasks.add_task(process_call, new_call_id, request)
+
+    return RedirectResponse(url=f"/calls/{new_call_id}", status_code=303)
 
 
 @router.get("/")

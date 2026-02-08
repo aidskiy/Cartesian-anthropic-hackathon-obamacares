@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from pathlib import Path
 
 import httpx
 
@@ -63,8 +64,9 @@ class CartesiaClientService:
         await self.update_agent(system_prompt, introduction)
 
         # Kick off the call via CLI in a background subprocess
+        cartesia_bin = str(Path.home() / ".cartesia" / "bin" / "cartesia")
         proc = await asyncio.create_subprocess_exec(
-            "cartesia", "call", to_number,
+            cartesia_bin, "call", to_number,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

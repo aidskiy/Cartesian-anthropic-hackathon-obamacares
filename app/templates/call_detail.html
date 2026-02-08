@@ -7,15 +7,31 @@
     <article>
         <header>Call Information</header>
         <table>
-            <tr><td><strong>Target</strong></td><td>{{ call.request.target_name }}</td></tr>
-            <tr><td><strong>Company</strong></td><td>{{ call.request.company }}</td></tr>
-            <tr><td><strong>Phone</strong></td><td>{{ call.request.phone_number }}</td></tr>
-            <tr><td><strong>Scenario</strong></td><td>{{ call.request.scenario.value | replace('_', ' ') | title }}</td></tr>
-            <tr><td><strong>Created</strong></td><td>{{ call.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td></tr>
+            <tr>
+                <td><strong>Target</strong></td>
+                <td>{{ call.request.target_name }}</td>
+            </tr>
+            <tr>
+                <td><strong>Company</strong></td>
+                <td>{{ call.request.company }}</td>
+            </tr>
+            <tr>
+                <td><strong>Phone</strong></td>
+                <td>{{ call.request.phone_number }}</td>
+            </tr>
+            <tr>
+                <td><strong>Scenario</strong></td>
+                <td>{{ call.request.scenario.value | replace('_', ' ') | title }}</td>
+            </tr>
+            <tr>
+                <td><strong>Created</strong></td>
+                <td>{{ call.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+            </tr>
         </table>
 
         <div id="call-status" hx-get="/api/calls/{{ call.id }}/status" hx-trigger="every 2s" hx-swap="outerHTML">
-            <span class="status-badge status-{{ call.status.value }}">{{ call.status.value | replace('_', ' ') | title }}</span>
+            <span class="status-badge status-{{ call.status.value }}">{{ call.status.value | replace('_', ' ') | title
+                }}</span>
         </div>
 
         {% if call.notion_page_url %}
@@ -27,6 +43,12 @@
             Generate Report
         </button>
         <div id="report-result"></div>
+        {% endif %}
+
+        {% if call.status.value in ('completed', 'failed') %}
+        <form method="POST" action="/api/calls/{{ call.id }}/retry">
+            <button type="submit" class="contrast">Call Again</button>
+        </form>
         {% endif %}
     </article>
 
@@ -56,9 +78,8 @@
 
 <article>
     <header>Transcript</header>
-    <div id="transcript" hx-get="/api/calls/{{ call.id }}/transcript"
-         {% if call.status.value not in ('completed', 'failed') %}hx-trigger="every 3s"{% endif %}
-         hx-swap="outerHTML">
+    <div id="transcript" hx-get="/api/calls/{{ call.id }}/transcript" {% if call.status.value not in
+        ('completed', 'failed' ) %}hx-trigger="every 3s" {% endif %} hx-swap="outerHTML">
         <div class="transcript-box">{{ call.transcript or 'Waiting for call to begin...' }}</div>
     </div>
 </article>
