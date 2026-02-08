@@ -156,7 +156,11 @@ async def initiate_call(
 async def get_call_status(call_id: str, request: Request):
     record = call_store.get(call_id)
     if not record:
-        raise HTTPException(status_code=404, detail="Call not found")
+        return HTMLResponse(f"""
+            <div id="call-status">
+                <span class="status-badge status-failed">Call Not Found</span>
+            </div>
+        """)
 
     # If call is in progress, try to update from Cartesia
     if record.status == CallStatus.in_progress and record.cartesia_call_id:
@@ -173,8 +177,10 @@ async def get_call_status(call_id: str, request: Request):
         except Exception:
             pass
 
+    trigger = 'hx-trigger="every 2s"' if record.status not in (CallStatus.completed, CallStatus.failed) else ''
+
     return HTMLResponse(f"""
-        <div id="call-status" hx-get="/api/calls/{call_id}/status" hx-trigger="every 2s" hx-swap="outerHTML">
+        <div id="call-status" hx-get="/api/calls/{call_id}/status" {trigger} hx-swap="outerHTML">
             <span class="status-badge status-{record.status.value}">{record.status.value.replace('_', ' ').title()}</span>
             {f'<p style="color: var(--color-error);">{html.escape(record.error)}</p>' if record.error else ''}
         </div>
