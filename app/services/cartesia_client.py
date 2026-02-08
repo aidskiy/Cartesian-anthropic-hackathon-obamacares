@@ -34,8 +34,8 @@ class CartesiaClientService:
     async def update_agent(self, system_prompt: str, first_message: str) -> dict:
         """PATCH /agents/{agent_id} — update the agent config before a call."""
         payload = {
-            "llm": {"system_prompt": system_prompt},
-            "first_message": first_message,
+            "llm_system_prompt": system_prompt,
+            "llm_introduce": first_message,
         }
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             resp = await client.patch(
@@ -44,7 +44,9 @@ class CartesiaClientService:
                 json=payload,
             )
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            logger.info("Agent updated — llm_introduce: %s", data.get("llm_introduce", "")[:80])
+            return data
 
     async def initiate_call(
         self,
@@ -62,6 +64,10 @@ class CartesiaClientService:
         """
         # Update agent with the script for this call
         await self.update_agent(system_prompt, introduction)
+
+        # Ensure +1 country code
+        if not to_number.startswith("+1"):
+            to_number = "+1" + to_number.lstrip("+")
 
         # Kick off the call via CLI in a background subprocess
         cartesia_bin = str(Path.home() / ".cartesia" / "bin" / "cartesia")

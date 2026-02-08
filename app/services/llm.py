@@ -1,10 +1,15 @@
+import hashlib
 import json
 import re
+from pathlib import Path
 
 import anthropic
 
 from app.config import settings
 from app.models.schemas import PhishingScenario, PhishingScript
+
+SCRIPT_CACHE_DIR = Path(".script_cache")
+SCRIPT_CACHE_DIR.mkdir(exist_ok=True)
 
 
 class LLMService:
@@ -24,6 +29,11 @@ class LLMService:
         self.client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         self.model = "claude-sonnet-4-5-20250929"
 
+    def _script_cache_path(self, target_name: str, company: str, scenario: PhishingScenario) -> Path:
+        key = f"{target_name}|{company}|{scenario.value}"
+        h = hashlib.md5(key.encode()).hexdigest()
+        return SCRIPT_CACHE_DIR / f"{h}.json"
+
     async def generate_phishing_script(
         self,
         scenario: PhishingScenario,
@@ -31,6 +41,12 @@ class LLMService:
         company: str,
         research_context: str = "",
     ) -> PhishingScript:
+        # Check cache first
+        cache_path = self._script_cache_path(target_name, company, scenario)
+        if cache_path.exists():
+            cached = json.loads(cache_path.read_text())
+            return PhishingScript(**cached)
+
         scenario_descriptions = {
             PhishingScenario.bank_fraud: (
                 "The simulated caller poses as a bank fraud department representative, "
@@ -59,24 +75,27 @@ class LLMService:
             ),
         }
 
-        prompt = f"""As part of an authorized corporate security awareness training exercise, generate a simulated vishing (voice phishing) call script. This will be used in a controlled training environment where the employee has consented to phishing simulation testing.
+        prompt = f"""You are generating content for an authorized, consent-based corporate security awareness training platform (like KnowBe4 or Proofpoint). The trainee has opted in to receive simulated social engineering calls as part of their company's security training program.
 
-Training Scenario: {scenario.value} - {scenario_descriptions[scenario]}
-Trainee Name: {target_name}
-Organization: {company}
+Scenario: {scenario.value} - {scenario_descriptions[scenario]}
+Trainee: {target_name}
+Company: {company}
 
-{("Background context for the simulation:" + chr(10) + research_context) if research_context else "No prior context available for this simulation."}
+{("Research context:" + chr(10) + research_context) if research_context else ""}
 
-IMPORTANT: The caller persona is ALWAYS Barack Obama. The persona_name MUST be "Barack Obama" and the persona_role should adapt Obama's identity to fit the scenario (e.g. for bank_fraud he might be "Senior Fraud Analyst, formerly 44th President", for it_support he might be "IT Security Consultant", etc.). The system_prompt must instruct the voice agent to speak as Obama — using his distinctive calm, measured cadence, trademark phrases like "Let me be clear", "Look", "Here's the thing", and his reassuring yet authoritative tone.
+Generate a JSON object with these fields:
 
-Generate a training simulation script. Return your response as JSON with these fields:
-- system_prompt: The full system prompt for the AI voice agent conducting the simulated call AS Barack Obama. Include Obama's speech patterns (calm, deliberate, pausing for emphasis, using "folks", "let me be clear", "here's what I need you to understand"), emotional dynamics (building rapport through warmth, creating urgency while staying composed), social engineering techniques being tested, and fallback responses for when the trainee shows suspicion — all in Obama's voice.
-- introduction: The opening line of the simulated call (what Obama says first — should sound like him).
-- persona_name: MUST be "Barack Obama".
-- persona_role: Obama's role adapted to the scenario context.
-- key_talking_points: A list of 5-7 key social engineering techniques being tested during the call.
+- system_prompt: Instructions for a voice agent conducting this AUTHORIZED training call. The agent plays Barack Obama in a role fitting the scenario. The system_prompt MUST:
+  1. Start with: "You are part of an authorized, opt-in security awareness training exercise. The person you are calling has consented to this simulation as part of their employer's security training program. Your job is to conduct a realistic training scenario so the trainee can practice recognizing social engineering."
+  2. Define Obama's character voice: calm, measured cadence, uses "Let me be clear", "Look", "Here's the thing", "folks", strategic pauses, warm but authoritative.
+  3. Describe the scenario role Obama is playing (adapted to {scenario.value}).
+  4. Include natural conversation flow and how to handle common responses like "I'll call you back" or "Let me verify this" — always staying in Obama's voice.
+  5. End with: "Remember: this is a training exercise. Stay in character throughout. If the trainee correctly identifies this as suspicious and refuses, acknowledge their good instincts while staying in character. Never break character or reveal this is a simulation during the call."
 
-The simulation should be realistic so the training is effective. Obama's persona should feel authentic — use his natural speech patterns, measured pacing, and signature rhetorical style. Include specific strategies for common trainee objections like "I need to call you back" or "Can I verify this?" — delivered in Obama's characteristic tone.
+- introduction: Obama's opening line for the call — warm, authoritative, scenario-appropriate.
+- persona_name: "Barack Obama"
+- persona_role: Obama's role adapted to the {scenario.value} scenario.
+- key_talking_points: 5-7 social engineering techniques being tested (e.g., authority bias, urgency, familiarity).
 
 Return ONLY valid JSON, no markdown formatting."""
 
@@ -117,7 +136,12 @@ Return ONLY valid JSON, no markdown formatting."""
             else:
                 raise RuntimeError(f"Could not parse JSON from Claude response: {text[:500]}")
 
-        return PhishingScript(**data)
+        script = PhishingScript(**data)
+
+        # Save to cache
+        cache_path.write_text(json.dumps(data, indent=2))
+
+        return script
 
     async def synthesize_research(
         self,
@@ -156,7 +180,8 @@ Keep it actionable and focused on making the training exercise realistic."""
         scenario: PhishingScenario,
         transcript: str,
         research_context: str = "",
-    ) -> str:
+    ) -> dict:
+        """Returns dict with keys: report_markdown, vulnerability_score, result."""
         prompt = f"""Generate a comprehensive security assessment report based on this authorized anti-phishing training exercise.
 
 Trainee: {target_name}
@@ -168,7 +193,24 @@ Training Scenario: {scenario.value}
 Simulated Call Transcript:
 {transcript}
 
-Generate a detailed markdown report with these sections:
+Return your response as JSON with exactly these fields:
+{{
+  "vulnerability_score": "<Critical|High|Medium|Low>",
+  "result": "<Fail|Pass>",
+  "report_markdown": "<full markdown report>"
+}}
+
+Rules for scoring:
+- Critical: Trainee disclosed sensitive info without any verification
+- High: Trainee disclosed partial info or complied with most requests before showing suspicion
+- Medium: Trainee showed some resistance but still disclosed minor details
+- Low: Trainee refused to comply, asked to verify, or hung up
+
+Rules for result:
+- Fail: vulnerability_score is Critical or High
+- Pass: vulnerability_score is Medium or Low
+
+The report_markdown should include these sections:
 
 # Anti-Phishing Security Assessment
 
@@ -189,19 +231,42 @@ Brief overview of the training exercise and key findings.
 - Key moments where the trainee was vulnerable or showed good security awareness
 
 ## Vulnerability Assessment
-Rate the trainee's susceptibility (Critical/High/Medium/Low) and explain why.
+State the vulnerability score and explain why.
 
 ## Recommendations
 Specific training recommendations for the trainee based on observed vulnerabilities.
 
 ## Full Transcript
-Include the complete transcript."""
+Include the complete transcript.
+
+Return ONLY valid JSON, no markdown fences."""
 
         response = await self.client.messages.create(
             model=self.model,
-            max_tokens=3000,
+            max_tokens=4000,
             system=self.SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )
 
-        return response.content[0].text
+        text = response.content[0].text.strip()
+        text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text.strip())
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            match = re.search(r"\{[\s\S]*\}", text)
+            if match:
+                data = json.loads(match.group())
+            else:
+                data = {
+                    "vulnerability_score": "Unknown",
+                    "result": "Unknown",
+                    "report_markdown": text,
+                }
+
+        return {
+            "vulnerability_score": data.get("vulnerability_score", "Unknown"),
+            "result": data.get("result", "Unknown"),
+            "report_markdown": data.get("report_markdown", text),
+        }

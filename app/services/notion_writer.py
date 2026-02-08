@@ -9,7 +9,19 @@ from app.config import settings
 class NotionWriterService:
     def __init__(self):
         self.client = Client(auth=settings.notion_secret)
-        self.parent_page_id = settings.notion_parent_page_id
+        self.parent_page_id = self._extract_id(settings.notion_parent_page_id)
+        self.database_id = self._extract_id(settings.notion_database_id)
+
+    @staticmethod
+    def _extract_id(value: str) -> str:
+        """Extract a Notion UUID from a raw ID or full URL."""
+        if not value:
+            return ""
+        match = re.search(r"([a-f0-9]{32})", value.replace("-", ""))
+        if match:
+            h = match.group(1)
+            return f"{h[:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:]}"
+        return value
 
     def _parse_inline(self, text: str) -> list[dict]:
         """Parse inline markdown (bold, italic, code) into Notion rich_text objects."""
@@ -163,6 +175,90 @@ class NotionWriterService:
 
         return blocks
 
+    async def ensure_database(self) -> str:
+        """Create the assessments database under the parent page if needed."""
+        import httpx
+
+        # Validate existing database_id if set
+        if self.database_id:
+            def _check():
+                resp = httpx.get(
+                    f"https://api.notion.com/v1/databases/{self.database_id}",
+                    headers={
+                        "Authorization": f"Bearer {settings.notion_secret}",
+                        "Notion-Version": "2022-06-28",
+                    },
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if not data.get("archived", False) and data.get("properties"):
+                        return True
+                return False
+
+            valid = await asyncio.to_thread(_check)
+            if valid:
+                return self.database_id
+            self.database_id = ""
+
+        # Use raw HTTP because notion-client 2.7.0 silently drops properties
+
+        def _create_db():
+            resp = httpx.post(
+                "https://api.notion.com/v1/databases",
+                headers={
+                    "Authorization": f"Bearer {settings.notion_secret}",
+                    "Notion-Version": "2022-06-28",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "parent": {"type": "page_id", "page_id": self.parent_page_id},
+                    "title": [{"type": "text", "text": {"content": "Phishing Assessments"}}],
+                    "properties": {
+                        "Name": {"title": {}},
+                        "Date": {"date": {}},
+                        "Target": {"rich_text": {}},
+                        "Company": {"rich_text": {}},
+                        "Scenario": {
+                            "select": {
+                                "options": [
+                                    {"name": "bank_fraud", "color": "red"},
+                                    {"name": "it_support", "color": "blue"},
+                                    {"name": "ceo_fraud", "color": "purple"},
+                                    {"name": "vendor_invoice", "color": "orange"},
+                                    {"name": "hr_benefits", "color": "green"},
+                                ]
+                            }
+                        },
+                        "Vulnerability": {
+                            "select": {
+                                "options": [
+                                    {"name": "Critical", "color": "red"},
+                                    {"name": "High", "color": "orange"},
+                                    {"name": "Medium", "color": "yellow"},
+                                    {"name": "Low", "color": "green"},
+                                ]
+                            }
+                        },
+                        "Result": {
+                            "select": {
+                                "options": [
+                                    {"name": "Fail", "color": "red"},
+                                    {"name": "Pass", "color": "green"},
+                                ]
+                            }
+                        },
+                    },
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+        db = await asyncio.to_thread(_create_db)
+        self.database_id = db["id"]
+        return self.database_id
+
     async def create_call_report(
         self,
         title: str,
@@ -172,32 +268,25 @@ class NotionWriterService:
         research_context: str,
         transcript: str,
         report_markdown: str,
+        vulnerability_score: str = "Unknown",
+        result: str = "Unknown",
     ) -> str:
-        """Create a Notion page with the call report. Returns the page URL."""
-        # Build structured blocks from markdown sections
+        """Create a database row with properties and the full report as page content."""
+        from datetime import datetime, timezone
+
+        db_id = await self.ensure_database()
+
+        # Build page content blocks
         children: list[dict] = []
 
-        # Target info section
+        # Assessment report
         children.append({
             "object": "block",
             "type": "heading_2",
-            "heading_2": {"rich_text": self._parse_inline("Target Information")},
+            "heading_2": {"rich_text": self._parse_inline("Assessment Report")},
         })
-        children.append({
-            "object": "block",
-            "type": "bulleted_list_item",
-            "bulleted_list_item": {"rich_text": self._parse_inline(f"**Name:** {target_name}")},
-        })
-        children.append({
-            "object": "block",
-            "type": "bulleted_list_item",
-            "bulleted_list_item": {"rich_text": self._parse_inline(f"**Company:** {company}")},
-        })
-        children.append({
-            "object": "block",
-            "type": "bulleted_list_item",
-            "bulleted_list_item": {"rich_text": self._parse_inline(f"**Scenario:** {scenario}")},
-        })
+        if report_markdown:
+            children.extend(self._markdown_to_blocks(report_markdown))
         children.append({"object": "block", "type": "divider", "divider": {}})
 
         # Research context
@@ -216,16 +305,6 @@ class NotionWriterService:
             })
         children.append({"object": "block", "type": "divider", "divider": {}})
 
-        # Assessment report (parsed from markdown)
-        children.append({
-            "object": "block",
-            "type": "heading_2",
-            "heading_2": {"rich_text": self._parse_inline("Assessment Report")},
-        })
-        if report_markdown:
-            children.extend(self._markdown_to_blocks(report_markdown))
-        children.append({"object": "block", "type": "divider", "divider": {}})
-
         # Full transcript
         children.append({
             "object": "block",
@@ -233,7 +312,6 @@ class NotionWriterService:
             "heading_2": {"rich_text": self._parse_inline("Full Transcript")},
         })
         if transcript:
-            # Transcript goes in a code block for readability
             children.append({
                 "object": "block",
                 "type": "code",
@@ -249,28 +327,66 @@ class NotionWriterService:
                 "paragraph": {"rich_text": [{"type": "text", "text": {"content": "No transcript available."}}]},
             })
 
-        # Create page with first batch (Notion API limit: 100 blocks per request)
+        # Database row properties
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        valid_scores = ("Critical", "High", "Medium", "Low")
+        valid_results = ("Fail", "Pass")
+        vuln_select = vulnerability_score if vulnerability_score in valid_scores else "Medium"
+        result_select = result if result in valid_results else "Fail"
+
+        properties = {
+            "Name": {"title": [{"type": "text", "text": {"content": title}}]},
+            "Date": {"date": {"start": today}},
+            "Target": {"rich_text": [{"type": "text", "text": {"content": target_name}}]},
+            "Company": {"rich_text": [{"type": "text", "text": {"content": company}}]},
+            "Scenario": {"select": {"name": scenario}},
+            "Vulnerability": {"select": {"name": vuln_select}},
+            "Result": {"select": {"name": result_select}},
+        }
+
         first_batch = children[:100]
         remaining = children[100:]
 
+        # Use raw HTTP with pinned Notion-Version (SDK uses incompatible version)
+        import httpx
+
         def _create():
-            return self.client.pages.create(
-                parent={"page_id": self.parent_page_id},
-                properties={
-                    "title": [{"type": "text", "text": {"content": title}}],
+            resp = httpx.post(
+                "https://api.notion.com/v1/pages",
+                headers={
+                    "Authorization": f"Bearer {settings.notion_secret}",
+                    "Notion-Version": "2022-06-28",
+                    "Content-Type": "application/json",
                 },
-                children=first_batch,
+                json={
+                    "parent": {"database_id": db_id},
+                    "properties": properties,
+                    "children": first_batch,
+                },
+                timeout=30,
             )
+            resp.raise_for_status()
+            return resp.json()
 
         page = await asyncio.to_thread(_create)
         page_id = page["id"]
 
-        # Append remaining blocks in batches of 100
         for batch_start in range(0, len(remaining), 100):
             batch = remaining[batch_start:batch_start + 100]
 
             def _append(b=batch):
-                return self.client.blocks.children.append(block_id=page_id, children=b)
+                resp = httpx.patch(
+                    f"https://api.notion.com/v1/blocks/{page_id}/children",
+                    headers={
+                        "Authorization": f"Bearer {settings.notion_secret}",
+                        "Notion-Version": "2022-06-28",
+                        "Content-Type": "application/json",
+                    },
+                    json={"children": b},
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                return resp.json()
 
             await asyncio.to_thread(_append)
 

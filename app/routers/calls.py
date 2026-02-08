@@ -17,11 +17,10 @@ logger = logging.getLogger(__name__)
 
 
 async def _poll_call_completion(
-    call_id: str, cartesia, poll_interval: int = 5, timeout: int = 120
+    call_id: str, cartesia, poll_interval: int = 5, timeout: int = 600
 ):
     """Poll Cartesia until the call ends, then return the transcript."""
     record = call_store[call_id]
-    logger.info("Polling call %s with cartesia_call_id=%s", call_id, record.cartesia_call_id)
     elapsed = 0
     while elapsed < timeout:
         await asyncio.sleep(poll_interval)
@@ -29,13 +28,10 @@ async def _poll_call_completion(
         try:
             call_data = await cartesia.get_call(record.cartesia_call_id)
             status = call_data.get("status", "")
-            logger.info("Call %s status: %s (elapsed %ds)", call_id, status, elapsed)
             if status in ("completed", "failed", "cancelled", "ended", "no-answer", "busy"):
                 return await cartesia.get_transcript(record.cartesia_call_id)
-        except Exception as e:
-            logger.warning("Poll error for call %s: %s", call_id, e)
+        except Exception:
             continue
-    logger.warning("Poll timeout for call %s after %ds", call_id, timeout)
     return None
 
 
@@ -46,15 +42,16 @@ async def _generate_report_and_write_notion(call_id: str, llm, notion):
     if record.research:
         research_context = record.research.synthesis
 
-    record.report_markdown = await llm.generate_report(
+    report_data = await llm.generate_report(
         target_name=record.request.target_name,
         company=record.request.company,
         scenario=record.request.scenario,
         transcript=record.transcript or "No transcript available",
         research_context=research_context,
     )
+    record.report_markdown = report_data["report_markdown"]
 
-    if notion.parent_page_id:
+    if notion.parent_page_id or notion.database_id:
         title = (
             f"Phishing Assessment - {record.request.target_name} "
             f"({record.request.scenario.value})"
@@ -67,6 +64,8 @@ async def _generate_report_and_write_notion(call_id: str, llm, notion):
             research_context=research_context,
             transcript=record.transcript or "",
             report_markdown=record.report_markdown,
+            vulnerability_score=report_data["vulnerability_score"],
+            result=report_data["result"],
         )
 
 
