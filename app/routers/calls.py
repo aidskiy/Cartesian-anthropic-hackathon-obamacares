@@ -17,10 +17,11 @@ logger = logging.getLogger(__name__)
 
 
 async def _poll_call_completion(
-    call_id: str, cartesia, poll_interval: int = 5, timeout: int = 600
+    call_id: str, cartesia, poll_interval: int = 5, timeout: int = 120
 ):
     """Poll Cartesia until the call ends, then return the transcript."""
     record = call_store[call_id]
+    logger.info("Polling call %s with cartesia_call_id=%s", call_id, record.cartesia_call_id)
     elapsed = 0
     while elapsed < timeout:
         await asyncio.sleep(poll_interval)
@@ -28,10 +29,13 @@ async def _poll_call_completion(
         try:
             call_data = await cartesia.get_call(record.cartesia_call_id)
             status = call_data.get("status", "")
+            logger.info("Call %s status: %s (elapsed %ds)", call_id, status, elapsed)
             if status in ("completed", "failed", "cancelled", "ended", "no-answer", "busy"):
                 return await cartesia.get_transcript(record.cartesia_call_id)
-        except Exception:
+        except Exception as e:
+            logger.warning("Poll error for call %s: %s", call_id, e)
             continue
+    logger.warning("Poll timeout for call %s after %ds", call_id, timeout)
     return None
 
 

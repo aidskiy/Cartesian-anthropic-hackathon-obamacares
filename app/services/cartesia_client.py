@@ -66,19 +66,29 @@ class CartesiaClientService:
         # Kick off the call via CLI in a background subprocess
         cartesia_bin = str(Path.home() / ".cartesia" / "bin" / "cartesia")
         proc = await asyncio.create_subprocess_exec(
-            cartesia_bin, "call", to_number,
+            cartesia_bin, "call", to_number, settings.cartesia_agent_id,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         logger.info("Started cartesia call to %s (pid=%s)", to_number, proc.pid)
 
         # Give Cartesia a moment to register the call, then find it via the API
-        await asyncio.sleep(3)
+        await asyncio.sleep(5)
+
+        # Check if the subprocess already exited (error case)
+        if proc.returncode is not None:
+            stdout_data = await proc.stdout.read() if proc.stdout else b""
+            stderr_data = await proc.stderr.read() if proc.stderr else b""
+            logger.error(
+                "Cartesia CLI exited early (code=%s) stdout=%s stderr=%s",
+                proc.returncode, stdout_data.decode(), stderr_data.decode(),
+            )
 
         # Try to find the most recent call for this agent
         calls = await self.list_calls(limit=1)
         call_data = calls[0] if calls else {}
         call_id = call_data.get("id", f"cli-{proc.pid}")
+        logger.info("Resolved cartesia call_id=%s (from %d calls)", call_id, len(calls))
 
         return {"id": call_id, "pid": proc.pid, "status": "initiated"}
 
